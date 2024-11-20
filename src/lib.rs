@@ -13,19 +13,23 @@ pub use bn254::{
 
 mod constants;
 mod imp;
-#[cfg(all(
-    not(target_os = "zkvm"),
-    not(target_vendor = "succinct"),
-    feature = "zkvm-hint"
-))]
+#[cfg(all(feature = "zkvm-hint", target_has_atomic = "ptr"))]
 mod zkvm_hints;
 
 #[cfg(all(
     not(target_os = "zkvm"),
     not(target_vendor = "succinct"),
-    feature = "zkvm-hint"
+    feature = "zkvm-hint",
+    target_has_atomic = "ptr"
 ))]
-pub use zkvm_hints::set_zkvm_hint_hook;
+pub use zkvm_hints::set_zkvm_hint_write_hook;
+#[cfg(all(
+    target_os = "zkvm",
+    target_vendor = "succinct",
+    feature = "zkvm-hint",
+    target_has_atomic = "ptr"
+))]
+pub use zkvm_hints::set_zkvm_hint_read_hook;
 
 pub(crate) use constants::*;
 
@@ -34,7 +38,7 @@ pub(crate) type Mds = [[Fr; T]; T];
 
 pub fn hash_with_domain(inp: &[Fr; 2], domain: Fr) -> Fr {
     #[cfg(all(target_os = "zkvm", target_vendor = "succinct", feature = "zkvm-hint"))]
-    return Fr::from_repr_vartime(sp1_lib::io::read_vec().try_into().unwrap()).unwrap();
+    return Fr::from_repr_vartime(zkvm_hints::read_hint()).unwrap();
 
     if inp[1].is_zero_vartime() && inp[0].is_zero_vartime() && domain.is_zero_vartime() {
         return EMPTY_HASH;
@@ -48,7 +52,7 @@ pub fn hash_with_domain(inp: &[Fr; 2], domain: Fr) -> Fr {
         not(target_vendor = "succinct"),
         feature = "zkvm-hint"
     ))]
-    zkvm_hints::hint(state[0].to_repr());
+    zkvm_hints::write(state[0].to_repr());
 
     state[0]
 }
@@ -61,7 +65,7 @@ pub fn hash_msg(msg: &[Fr], cap: Option<u128>) -> Fr {
     }
 
     #[cfg(all(target_os = "zkvm", target_vendor = "succinct", feature = "zkvm-hint"))]
-    return Fr::from_repr_vartime(sp1_lib::io::read_vec().try_into().unwrap()).unwrap();
+    return Fr::from_repr_vartime(zkvm_hints::read_hint()).unwrap();
 
     let cap = cap.map(Fr::from_u128).unwrap_or_else(|| {
         // trick here since msg.len() won't exceed u64::MAX
@@ -92,7 +96,7 @@ pub fn hash_msg(msg: &[Fr], cap: Option<u128>) -> Fr {
         not(target_vendor = "succinct"),
         feature = "zkvm-hint"
     ))]
-    zkvm_hints::hint(state[0].to_repr());
+    zkvm_hints::write(state[0].to_repr());
 
     state[0]
 }
@@ -103,7 +107,7 @@ pub fn hash_code(code: &[u8]) -> [u8; 32] {
     }
 
     #[cfg(all(target_os = "zkvm", target_vendor = "succinct", feature = "zkvm-hint"))]
-    return sp1_lib::io::read_vec().try_into().unwrap();
+    return zkvm_hints::read_hint();
 
     let mut msg = code.chunks(POSEIDON_HASH_BYTES_IN_FIELD).map(|chunk| {
         let mut be_bytes = [0u8; 32];
@@ -168,7 +172,7 @@ pub fn hash_code(code: &[u8]) -> [u8; 32] {
         not(target_vendor = "succinct"),
         feature = "zkvm-hint"
     ))]
-    zkvm_hints::hint(result);
+    zkvm_hints::write(result);
 
     result
 }

@@ -1,53 +1,51 @@
-// copy from https://github.com/rust-lang/log/blob/master/src/lib.rs#L452
+#[cfg(all(
+    not(target_os = "zkvm"),
+    not(target_vendor = "succinct"),
+))]
+mod write {
+    pub(super) static mut HOOK: &dyn Fn([u8; 32]) = &|_| {};
+}
 
-use std::sync::atomic::Ordering;
+#[cfg(all(target_os = "zkvm",target_vendor = "succinct"))]
+mod read {
+    pub(super) static mut HOOK: &dyn Fn() -> [u8; 32] = &|| sp1_lib::io::read_vec().try_into().unwrap();
+}
 
-pub static mut ZKVM_HINT_HOOK: &dyn Fn([u8; 32]) = &|_| {};
-pub static STATE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(all(target_os = "zkvm",target_vendor = "succinct"))]
+pub unsafe fn set_zkvm_hint_read_hook<F>(make_callback: F)
+where F: FnOnce() -> &'static dyn Fn() -> [u8; 32],
+{
+    read::HOOK = make_callback();
+}
 
-#[derive(Debug)]
-pub struct SetZkvmHintHookError(pub(super) ());
-
-pub const UNINITIALIZED: usize = 0;
-pub const INITIALIZING: usize = 1;
-pub const INITIALIZED: usize = 2;
-
-// copy from https://github.com/rust-lang/log/blob/master/src/lib.rs#L1400
-#[cfg(all(feature = "zkvm-hint", target_has_atomic = "ptr"))]
-pub fn set_zkvm_hint_hook<F>(make_callback: F) -> Result<(), SetZkvmHintHookError>
+#[cfg(all(
+    not(target_os = "zkvm"),
+    not(target_vendor = "succinct"),
+))]
+pub unsafe fn set_zkvm_hint_write_hook<F>(make_callback: F)
 where
     F: FnOnce() -> &'static dyn Fn([u8; 32]),
 {
-    use std::sync::atomic::Ordering;
-    match STATE.compare_exchange(
-        UNINITIALIZED,
-        INITIALIZING,
-        Ordering::Acquire,
-        Ordering::Relaxed,
-    ) {
-        Ok(UNINITIALIZED) => {
-            unsafe {
-                ZKVM_HINT_HOOK = make_callback();
-            }
-            STATE.store(INITIALIZED, Ordering::Release);
-            Ok(())
-        }
-        Err(INITIALIZING) => {
-            while STATE.load(Ordering::Relaxed) == INITIALIZING {
-                std::hint::spin_loop();
-            }
-            Err(SetZkvmHintHookError(()))
-        }
-        _ => Err(SetZkvmHintHookError(())),
-    }
+    write::HOOK = make_callback();
 }
 
+#[cfg(all(
+    not(target_os = "zkvm"),
+    not(target_vendor = "succinct"),
+    feature = "zkvm-hint"
+))]
 #[inline]
-pub fn hint(result: [u8; 32]) {
-    let hook = if STATE.load(Ordering::Acquire) != INITIALIZED {
-        &|_| {}
-    } else {
-        unsafe { ZKVM_HINT_HOOK }
-    };
-    hook(result);
+pub fn write(result: [u8; 32]) {
+    unsafe { write::HOOK(result) }
+}
+
+
+#[cfg(all(
+    target_os = "zkvm",
+    target_vendor = "succinct",
+    feature = "zkvm-hint"
+))]
+#[inline]
+pub fn read_hint() -> [u8; 32] {
+    unsafe { read::HOOK() }
 }
